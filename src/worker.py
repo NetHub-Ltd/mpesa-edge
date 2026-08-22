@@ -2,15 +2,18 @@
 Callback routing, event-envelope construction and validation
 for the NetHub M-Pesa Gateway Worker.
 
-Design rule:
-    We never validate the raw M-Pesa / Safaricom body.
-    We only guarantee that the envelope WE produce is complete
-    and well-formed before it is sent to the queue.
+Design rules:
+- We never validate the raw M-Pesa / Safaricom body.
+- We only guarantee that the envelope WE produce is complete.
+- C2B Validation is the only route that requires an immediate
+  synchronous decision. Everything else is queued.
+- Backend (FastAPI + PostgreSQL) owns all idempotency and
+  financial effects.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -28,7 +31,7 @@ class IntegrationInfo:
     """Minimal integration metadata that travels with every event."""
 
     id: str
-    type: str = "unknown"  # will later become "paybill" | "till" | ...
+    type: str = "unknown"  # later: "paybill" | "till" | ...
 
 
 @dataclass
@@ -75,7 +78,14 @@ def validate_envelope(envelope: EventEnvelope) -> Optional[str]:
     if envelope.provider != "mpesa":
         return "provider must be 'mpesa'"
 
-    if envelope.event_type not in ("c2b_validation", "c2b_confirmation"):
+    allowed = {
+        "c2b_validation",
+        "c2b_confirmation",
+        "stk_callback",
+        "b2c_result",
+        "b2c_timeout",
+    }
+    if envelope.event_type not in allowed:
         return f"unsupported event_type: {envelope.event_type}"
 
     if not envelope.integration.id or not envelope.integration.id.startswith("gw_"):
@@ -100,21 +110,28 @@ class CallbackRouter:
     """
     Parses and validates incoming M-Pesa callback requests.
 
-    Only checks method, path shape and the opaque integration_id.
+    Supported routes (under the same opaque integration ID):
+        /mpesa/cb/{integration_id}/validation
+        /mpesa/cb/{integration_id}/confirmation
+        /mpesa/cb/{integration_id}/stk
+        /mpesa/cb/{integration_id}/b2c-result
+        /mpesa/cb/{integration_id}/b2c-timeout
     """
 
-    ALLOWED_EVENTS = {"validation", "confirmation"}
-
+    # short name from URL  →  canonical event_type used in the envelope
     EVENT_TYPE_MAP = {
         "validation": "c2b_validation",
         "confirmation": "c2b_confirmation",
+        "stk": "stk_callback",
+        "b2c-result": "b2c_result",
+        "b2c-timeout": "b2c_timeout",
     }
 
     def __init__(self, request):
         self.request = request
         self.integration_id: Optional[str] = None
         self.event_type: Optional[str] = None  # short name from URL
-        self.canonical_event_type: Optional[str] = None  # c2b_* form
+        self.canonical_event_type: Optional[str] = None  # c2b_*, stk_*, b2c_*
         self.error_response: Optional[Response] = None
 
     def parse(self) -> bool:
@@ -138,7 +155,7 @@ class CallbackRouter:
         integration_id = parts[3]
         event_type = parts[4]
 
-        if event_type not in self.ALLOWED_EVENTS:
+        if event_type not in self.EVENT_TYPE_MAP:
             self.error_response = Response("Not Found", status=404)
             return False
 
@@ -150,6 +167,11 @@ class CallbackRouter:
         self.event_type = event_type
         self.canonical_event_type = self.EVENT_TYPE_MAP[event_type]
         return True
+
+    @property
+    def is_validation(self) -> bool:
+        """True when this is a C2B Validation request that needs an immediate decision."""
+        return self.event_type == "validation"
 
 
 # ---------------------------------------------------------------------------

@@ -60,3 +60,86 @@ class Default(WorkerEntrypoint):
         except Exception as exc:
             print(f"Queue error: {exc}")
             return Response("Failed to queue callback", status=500)
+"""
+Cloudflare Worker entrypoint for the NetHub M-Pesa Gateway.
+
+This file stays deliberately thin.
+All routing, envelope construction and validation live in worker.py.
+"""
+
+import json
+
+from workers import Response, WorkerEntrypoint
+from worker import CallbackRouter, EnvelopeBuilder, validate_envelope
+
+
+class Default(WorkerEntrypoint):
+    """
+    Cloudflare Worker entrypoint.
+    """
+
+    async def fetch(self, request):
+        """
+        Main request handler.
+
+        Flow:
+        1. Validate method + path + integration_id
+        2. Read the raw body (never validated)
+        3. Build the normalized envelope
+        4. Validate the envelope we just built
+        5. Special-case C2B Validation → immediate Safaricom response
+        6. All other routes → queue + 202
+        """
+        # --- Step A: Route & validate request shape ---
+        router = CallbackRouter(request)
+
+        if not router.parse():
+            return router.error_response
+
+        # --- Step B: Read original payload (untouched) ---
+        raw_body = await request.text()
+
+        # --- Step C: Build envelope ---
+        envelope = EnvelopeBuilder(router, raw_body).build()
+
+        # --- Step D: Validate only our envelope ---
+        error = validate_envelope(envelope)
+        if error:
+            print(f"Envelope validation failed: {error}")
+            return Response(f"Internal envelope error: {error}", status=500)
+
+        # --- Step E: Special handling for C2B Validation ---
+        if router.is_validation:
+            # Always accept for now (safe default).
+            # Later this can become a fast decision from a registry / cache.
+            # We still queue a copy so the backend has a full audit trail.
+            try:
+                await self.env.MPESA_QUEUE.send(json.dumps(envelope.to_dict()))
+            except Exception as exc:
+                # Logging failure must not block the required Safaricom response
+                print(f"Queue error (validation): {exc}")
+
+            # Exact shape expected by Safaricom for C2B Validation
+            return Response(
+                json.dumps(
+                    {
+                        "ResultCode": "0",
+                        "ResultDesc": "Accepted",
+                    }
+                ),
+                status=200,
+                headers={"Content-Type": "application/json"},
+            )
+
+        # --- Step F: All other routes → queue and acknowledge ---
+        try:
+            await self.env.MPESA_QUEUE.send(json.dumps(envelope.to_dict()))
+
+            return Response(
+                f"Queued successfully ({router.event_type}) for {router.integration_id}",
+                status=202,
+            )
+
+        except Exception as exc:
+            print(f"Queue error: {exc}")
+            return Response("Failed to queue callback", status=500)
