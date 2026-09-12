@@ -258,3 +258,59 @@ curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/badid123/confirmation \
 
 - `Nethub_Mpesa_Gateway_Architecture_Spec.pdf` – full architecture specification
 - `progress.md` – living implementation tracker
+
+---
+
+## 12. NetPay secure integration
+
+Safaricom never talks to NetPay directly. Flow:
+
+1. Daraja → **mpesa-edge** (`/mpesa/cb/{gw_*}/…`)
+2. Edge builds envelope → **Cloudflare Queue** `mpesa-callbacks`
+3. Same Worker **queue** handler → `POST {NETPAY_BASE_URL}/internal/events`
+4. Header: `X-Internal-Api-Key: {NETPAY_INTERNAL_API_KEY}`
+5. NetPay durable ingest (`inbound_events`) + payment state / ledger
+
+### Required secrets (Cloudflare)
+
+```bash
+npx wrangler secret put NETPAY_BASE_URL
+# value example: https://api.your-netpay-host.example  (no trailing slash)
+
+npx wrangler secret put NETPAY_INTERNAL_API_KEY
+# MUST equal NetPay env INTERNAL_API_KEY
+```
+
+Create the DLQ once (if not exists):
+
+```bash
+npx wrangler queues create mpesa-callbacks
+npx wrangler queues create mpesa-callbacks-dlq
+```
+
+### NetPay side
+
+- Set a long random `INTERNAL_API_KEY` (secrets manager / k8s secret).
+- Do not expose `/internal/*` without that key.
+- Prefer network isolation so only Cloudflare (or your worker egress) can reach ingest.
+- Integration `public_id` values must match URL `{gw_*}` ids registered with Daraja.
+
+### Local dev
+
+Use `.dev.vars` (gitignored):
+
+```
+NETPAY_BASE_URL=http://127.0.0.1:8000
+NETPAY_INTERNAL_API_KEY=unit-test-internal-api-key
+```
+
+### Failure behaviour
+
+| Outcome | Behaviour |
+|---------|-----------|
+| NetPay 2xx | Message acknowledged |
+| NetPay 5xx / 429 | Queue retries (up to `max_retries`) then **mpesa-callbacks-dlq** |
+| NetPay 401 | Retry until key fixed (check secrets) |
+| Missing secrets | Consumer errors until configured |
+
+Financial idempotency remains on NetPay (`event_id` + payment state machine + ledger).
