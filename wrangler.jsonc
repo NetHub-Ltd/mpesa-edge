@@ -9,11 +9,24 @@
     "observability": {
         "enabled": true
     },
+    // Secrets (set via CLI, not in this file):
+    //   npx wrangler secret put NETPAY_BASE_URL
+    //   npx wrangler secret put NETPAY_INTERNAL_API_KEY
+    // Optional local dev: .dev.vars (gitignored)
     "queues": {
         "producers": [
             {
                 "binding": "MPESA_QUEUE",
                 "queue": "mpesa-callbacks"
+            }
+        ],
+        "consumers": [
+            {
+                "queue": "mpesa-callbacks",
+                "max_batch_size": 5,
+                "max_retries": 8,
+                "max_batch_timeout": 5,
+                "dead_letter_queue": "mpesa-callbacks-dlq"
             }
         ]
     }
