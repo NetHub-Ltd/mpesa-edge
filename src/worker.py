@@ -145,15 +145,19 @@ class CallbackRouter:
         # request.url is a plain string in Cloudflare Python Workers
         parsed = urlparse(self.request.url)
         path = parsed.path.rstrip("/")
-        parts = path.split("/")
+        parts = [p for p in path.split("/") if p != ""]
 
-        # Expected: ['', 'mpesa', 'cb', '{integration_id}', '{event_type}']
-        if len(parts) != 5 or parts[1] != "mpesa" or parts[2] != "cb":
+        # Preferred: /cb/{integration_id}/{event_type}
+        # Legacy:    /mpesa/cb/{integration_id}/{event_type}
+        integration_id = None
+        event_type = None
+        if len(parts) == 3 and parts[0] == "cb":
+            integration_id, event_type = parts[1], parts[2]
+        elif len(parts) == 4 and parts[0] == "mpesa" and parts[1] == "cb":
+            integration_id, event_type = parts[2], parts[3]
+        else:
             self.error_response = Response("Not Found", status=404)
             return False
-
-        integration_id = parts[3]
-        event_type = parts[4]
 
         if event_type not in self.EVENT_TYPE_MAP:
             self.error_response = Response("Not Found", status=404)
