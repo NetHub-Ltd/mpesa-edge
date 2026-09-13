@@ -54,7 +54,7 @@ Python Cloudflare Worker
 All routes follow the pattern:
 
 ```
-POST /mpesa/cb/{integration_id}/{event_type}
+POST /cb/{integration_id}/{event_type}
 ```
 
 | Path segment     | Canonical `event_type` | Immediate response? | Notes |
@@ -72,11 +72,11 @@ POST /mpesa/cb/{integration_id}/{event_type}
 
 ### Example full URLs
 ```
-https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/validation
-https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/confirmation
-https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/stk
-https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/b2c-result
-https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/b2c-timeout
+https://gateway.nethub.co.ke/cb/gw_7xK92mPq/validation
+https://gateway.nethub.co.ke/cb/gw_7xK92mPq/confirmation
+https://gateway.nethub.co.ke/cb/gw_7xK92mPq/stk
+https://gateway.nethub.co.ke/cb/gw_7xK92mPq/b2c-result
+https://gateway.nethub.co.ke/cb/gw_7xK92mPq/b2c-timeout
 ```
 
 ---
@@ -133,7 +133,7 @@ Every queued message has this shape:
   "received_at": "2026-08-22T14:30:00.123456Z",
   "request": {
     "method": "POST",
-    "path": "/mpesa/cb/gw_7xK92mPq/confirmation"
+    "path": "/cb/gw_7xK92mPq/confirmation"
   },
   "payload": { ... original Safaricom body ... }
 }
@@ -202,27 +202,27 @@ These will be addressed in later incremental steps.
 
 ```bash
 # C2B Validation – must return Safaricom JSON
-curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/validation \
+curl -i -X POST https://gateway.nethub.co.ke/cb/gw_7xK92mPq/validation \
   -H "Content-Type: application/json" \
   -d '{"TransID":"TESTVAL1","TransAmount":"100.00"}'
 
 # C2B Confirmation
-curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/confirmation \
+curl -i -X POST https://gateway.nethub.co.ke/cb/gw_7xK92mPq/confirmation \
   -H "Content-Type: application/json" \
   -d '{"TransID":"TESTCONF1","TransAmount":"150.00"}'
 
 # STK Push callback
-curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/stk \
+curl -i -X POST https://gateway.nethub.co.ke/cb/gw_7xK92mPq/stk \
   -H "Content-Type: application/json" \
   -d '{"Body":{"stkCallback":{"CheckoutRequestID":"ws_CO_123","ResultCode":0}}}'
 
 # B2C Result
-curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/b2c-result \
+curl -i -X POST https://gateway.nethub.co.ke/cb/gw_7xK92mPq/b2c-result \
   -H "Content-Type: application/json" \
   -d '{"Result":{"ResultCode":0,"ResultDesc":"Success"}}'
 
 # B2C Timeout
-curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/b2c-timeout \
+curl -i -X POST https://gateway.nethub.co.ke/cb/gw_7xK92mPq/b2c-timeout \
   -H "Content-Type: application/json" \
   -d '{"Result":{"ResultCode":1,"ResultDesc":"Timeout"}}'
 ```
@@ -230,14 +230,14 @@ curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/b2c-timeout \
 ### Negative cases
 ```bash
 # Wrong method
-curl -i -X GET https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/confirmation
+curl -i -X GET https://gateway.nethub.co.ke/cb/gw_7xK92mPq/confirmation
 
 # Unknown event type
-curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/gw_7xK92mPq/unknown \
+curl -i -X POST https://gateway.nethub.co.ke/cb/gw_7xK92mPq/unknown \
   -H "Content-Type: application/json" -d '{}'
 
 # Bad integration ID
-curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/badid123/confirmation \
+curl -i -X POST https://gateway.nethub.co.ke/cb/badid123/confirmation \
   -H "Content-Type: application/json" -d '{}'
 ```
 
@@ -265,7 +265,7 @@ curl -i -X POST https://gateway.nethub.co.ke/mpesa/cb/badid123/confirmation \
 
 Safaricom never talks to NetPay directly. Flow:
 
-1. Daraja → **mpesa-edge** (`/mpesa/cb/{gw_*}/…`)
+1. Daraja → **mpesa-edge** (`/cb/{gw_*}/…`)
 2. Edge builds envelope → **Cloudflare Queue** `mpesa-callbacks`
 3. Same Worker **queue** handler → `POST {NETPAY_BASE_URL}/internal/events`
 4. Header: `X-Internal-Api-Key: {NETPAY_INTERNAL_API_KEY}`
@@ -326,3 +326,8 @@ curl -sS -X POST "https://<your-worker>/__netpay/ping" \
 ```
 
 Cron runs **every 5 minutes** (`edge.heartbeat` → NetPay). In NetPay **System status**, check **Last heartbeat**.
+
+## Callback path note
+
+Prefer `/cb/{gw_*}/…`. Paths containing the substring `mpesa` are rejected by Safaricom when registered as callback URLs. Legacy `/mpesa/cb/…` remains accepted by this Worker for old registrations.
+
