@@ -91,14 +91,20 @@ class Default(WorkerEntrypoint):
             print(f"Queue error: {exc}")
             return Response("Failed to queue callback", status=500)
 
-    async def queue(self, batch):
+    async def queue(self, batch, env, ctx):
         """
         Consume mpesa-callbacks and POST each envelope to NetPay /internal/events.
+
+        Cloudflare Python Workers invoke queue(batch, env, ctx) — four args with self.
+        Same pattern as scheduled(controller, env, ctx); missing env/ctx caused:
+          TypeError: Default.queue() takes 2 positional arguments but 4 were given
 
         Requires secrets:
           - NETPAY_BASE_URL           e.g. https://api.nethub.co.ke
           - NETPAY_INTERNAL_API_KEY   same value as NetPay INTERNAL_API_KEY
         """
+        _ = ctx
+        runtime_env = env if env is not None else self.env
         for message in batch.messages:
             try:
                 body = message.body
@@ -107,7 +113,7 @@ class Default(WorkerEntrypoint):
                 else:
                     envelope = json.loads(body) if isinstance(body, str) else body
 
-                status, text = await forward_envelope_to_netpay(self.env, envelope)
+                status, text = await forward_envelope_to_netpay(runtime_env, envelope)
                 eid = envelope.get("event_id") if isinstance(envelope, dict) else "?"
                 print(f"Forwarded event_id={eid} status={status} body={text[:200]}")
                 # Success: message is acked when handler completes without throw

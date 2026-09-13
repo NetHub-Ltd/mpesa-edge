@@ -331,3 +331,19 @@ Cron runs **every 5 minutes** (`edge.heartbeat` → NetPay). In NetPay **System 
 
 Prefer `/cb/{gw_*}/…`. Paths containing the substring `mpesa` are rejected by Safaricom when registered as callback URLs. Legacy `/mpesa/cb/…` remains accepted by this Worker for old registrations.
 
+
+## Cloudflare Python Worker handler signatures
+
+The Python Workers runtime invokes handlers with **four** positional arguments (including `self`):
+
+| Handler | Required signature |
+|---------|-------------------|
+| `fetch` | `async def fetch(self, request)` (request only is typical) |
+| `queue` | `async def queue(self, batch, env, ctx)` |
+| `scheduled` | `async def scheduled(self, controller, env, ctx)` |
+
+If `queue` or `scheduled` omit `env`/`ctx`, every invocation fails with:
+
+`TypeError: Default.queue() takes 2 positional arguments but 4 were given`
+
+That prevents forwarding callbacks to NetPay (queue) or heartbeats (cron). Prefer `env` from the handler args when provided; fall back to `self.env`.
