@@ -118,10 +118,16 @@ class Default(WorkerEntrypoint):
                 print(f"Forward failed (queue will retry): {exc}")
                 raise
 
-    async def scheduled(self, controller):
-        """Periodic live check that NetPay accepts edge traffic."""
+    async def scheduled(self, controller, env, ctx):
+        """
+        Periodic live check that NetPay accepts edge traffic.
+
+        Cloudflare Python Workers invoke scheduled(controller, env, ctx)
+        — signature must accept all four args (including self).
+        """
+        runtime_env = env if env is not None else self.env
         try:
-            status, text = await send_heartbeat(self.env, source="cron")
+            status, text = await send_heartbeat(runtime_env, source="cron")
             print(f"Heartbeat cron status={status} body={text[:200]}")
         except Exception as exc:
             print(f"Heartbeat cron failed: {exc}")
