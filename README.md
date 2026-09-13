@@ -314,3 +314,15 @@ NETPAY_INTERNAL_API_KEY=unit-test-internal-api-key
 | Missing secrets | Consumer errors until configured |
 
 Financial idempotency remains on NetPay (`event_id` + payment state machine + ledger).
+
+### Live test (edge → NetPay)
+
+After secrets are set:
+
+```bash
+# Manual ping (header must match EDGE_ADMIN_KEY or NETPAY_INTERNAL_API_KEY)
+curl -sS -X POST "https://<your-worker>/__netpay/ping" \
+  -H "X-Edge-Admin-Key: $NETPAY_INTERNAL_API_KEY"
+```
+
+Cron runs **every 5 minutes** (`edge.heartbeat` → NetPay). In NetPay **System status**, check **Last heartbeat**.
