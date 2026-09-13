@@ -91,3 +91,25 @@ async def forward_envelope_to_netpay(env: Any, envelope: dict[str, Any] | str) -
     if status >= 400:
         raise RuntimeError(f"NetPay rejected envelope {status}: {text[:300]}")
     return status, text
+
+
+async def send_heartbeat(env: Any, *, source: str = "cron") -> tuple[int, str]:
+    """POST a non-financial edge.heartbeat envelope to NetPay."""
+    import time
+    import uuid
+
+    event_id = f"hb_{int(time.time())}_{uuid.uuid4().hex[:10]}"
+    envelope = {
+        "event_id": event_id,
+        "provider": "mpesa",
+        "event_type": "edge.heartbeat",
+        "integration": {
+            "id": "gw_edge_heartbeat",
+            "public_id": "gw_edge_heartbeat",
+            "type": "edge",
+        },
+        "received_at": None,
+        "request": {"method": "HEARTBEAT", "path": "/internal/heartbeat"},
+        "payload": {"source": source, "worker": "mpesa-edge"},
+    }
+    return await forward_envelope_to_netpay(env, envelope)

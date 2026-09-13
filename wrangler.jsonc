@@ -29,5 +29,8 @@
                 "dead_letter_queue": "mpesa-callbacks-dlq"
             }
         ]
+    },
+    "triggers": {
+        "crons": ["*/5 * * * *"]
     }
 }
